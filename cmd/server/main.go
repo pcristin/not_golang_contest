@@ -113,6 +113,7 @@ func main() {
 	}()
 
 	// Add routes
+	router.Get("/health", handler.Health)
 	router.Post("/checkout", handler.Checkout)
 	router.Post("/purchase", handler.Purchase)
 

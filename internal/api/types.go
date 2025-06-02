@@ -55,3 +55,38 @@ type SaleData struct {
 	ItemName string
 	ImageURL string
 }
+
+// HealthStatus represents the system health and statistics
+type HealthStatus struct {
+	Status    string `json:"status"`
+	Timestamp string `json:"timestamp"`
+
+	// Service Health
+	Services map[string]string `json:"services"`
+
+	// Current Sale Info
+	Sale SaleInfo `json:"sale"`
+
+	// Performance Stats
+	Performance PerformanceStats `json:"performance"`
+}
+
+// SaleInfo contains current sale information
+type SaleInfo struct {
+	ID       int    `json:"id"`
+	ItemName string `json:"item_name,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
+	Stock    int64  `json:"stock_remaining"`
+	Sold     int64  `json:"items_sold"`
+	Active   bool   `json:"is_active"`
+}
+
+// PerformanceStats contains performance metrics
+type PerformanceStats struct {
+	AttemptQueueSize  int `json:"attempt_queue_size"`
+	PurchaseQueueSize int `json:"purchase_queue_size"`
+	QueueCapacity     struct {
+		Attempts  int `json:"attempts_max"`
+		Purchases int `json:"purchases_max"`
+	} `json:"queue_capacity"`
+}
