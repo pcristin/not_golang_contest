@@ -1,0 +1,43 @@
+# Git files
+.git
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Test files
+*_test.go
+testdata/
+
+# Build artifacts
+bin/
+dist/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Makefile
+Makefile
+
+# Test data
+cmd/generate-vegeta-targets/vegeta-targets.txt
+cmd/generate-vegeta-targets/generate-targets
+cmd/loadtest/loadtest
+
+# Environment files
+.env
+.env.* 
