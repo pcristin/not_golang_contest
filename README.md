@@ -20,17 +20,27 @@ This system implements **aggressive fast-fail** strategies optimized for flash s
 4. Return Success/Failure Response
 ```
 
+### Error Handling & Recovery
+- **Atomic Stock Management**: Redis DECR prevents overselling
+- **Graceful Degradation**: Failed requests don't crash the system  
+- **User Limit Enforcement**: 429 responses prevent abuse
+- **Connection Recovery**: Auto-reconnect on database failures
+- **Transaction Rollback**: Failed checkouts restore stock atomically
+
 ### Tech Stack Justification
-4 core libraries:
+
+**Go Dependencies (3 libraries):**
 | Dependency | Purpose | Size Impact |
 |------------|---------|-------------|
-| **Redis** | Atomic operations, session storage | Essential for concurrency |
-| **PostgreSQL** | Sale metadata, user history | Business logic persistence |
 | **Chi Router** | HTTP routing, middleware | Lightweight framework (~1MB) |
 | **Redigo** | Redis connection pooling | Mature, stable, lightweight client |
 | **lib/pq** | PostgreSQL driver | Raw SQL performance |
 
-**Binary Size**: ~9.3MB (lean, no ORM overhead) - can be optimized with build flags
+**Infrastructure Stack:**
+- **Redis** - Atomic operations, session storage (essential for concurrency)
+- **PostgreSQL** - Sale metadata, user history (business logic persistence)
+
+**Binary Size**: ~9.4MB (lean, no ORM overhead) - can be optimized with build flags
 
 ## 🧪 Testing Methodology
 
@@ -48,7 +58,7 @@ This system implements **aggressive fast-fail** strategies optimized for flash s
 
 ## 📊 Performance Results
 
-### Go Load Test Results
+### Go Load Test Results (local cmd/megaload/main.go)
 ```
 Duration: 1m 12s
 Requests: 1,000,000 (100% completion rate)
@@ -56,9 +66,10 @@ Throughput: 13,842 req/s
 Success Rate: 10,000 items sold (100% stock depleted)
 Error Rate: 0% server errors, 0% network timeouts
 Expected Rejections: 990,000 "sold out" responses (correct behavior)
+Total Requests Handled: 1,000,000
 ```
 
-### k6 Multi-Scenario Results
+### k6 Multi-Scenario Results (local loadtest.js)
 ```
 Duration: 2m 20s
 Throughput: 6,903 req/s sustained
@@ -66,11 +77,27 @@ Stock Management: 10,000/10,000 items sold (100% efficiency)
 Response Times: P95: 464ms | P99: 1.22s
 Business Logic: 838,732 proper "sold out" responses
 Error Handling: 100% correct status codes (409, 429, 400)
+Total Requests Handled: 960,000+
 ```
+
+### Grafana Cloud Load Test Results (free tier limits with loadtest-cloud.js)
+```
+Duration: 4 minutes
+Peak Load: 40 concurrent users
+Sustained Load: 25 users for 90 seconds
+Checkout Success Rate: 2,140 successful checkouts
+Response Times: P95: ~200ms | P99: ~300ms
+Request Rate: 15-20 req/s sustained with traffic bursts
+Total Requests Handled: 1,000+ verified connections
+Load Distribution: Amazon US East (Virginia) load zone
+Monitoring: Real-time Grafana Cloud dashboard tracking
+```
+
+![Grafana Cloud Load Test Results](grafana_results.jpg)
 
 ## 🚀 Optimization Opportunities
 
-**Current system handles 13k+ req/s on single instance.** Further optimizations available but avoided for clarity:
+**Current system handles 13k+ req/s on single instance.** Further optimizations available but avoided for clarity and to not overcomplicate the codebase:
 
 ### Low-Hanging Fruit
 - **Connection Reuse**: Batch Redis operations in single connection
@@ -111,13 +138,19 @@ Live demo: https://not-golang-contest.onrender.com
 
 For architecture decisions, database schema, and Redis key patterns, explore the codebase structure:
 - `internal/api/` - Handler implementations with business logic
-- `internal/database/` - Optimized Redis client with connection pooling
-- `cmd/server/` - Application bootstrap and dependency injection
+- `internal/database/` - Optimized Redis and PostgreSQL client with connection pooling
+- `cmd/server/` - Application bootstrap and dependency wiring
 
 ## 🥚 Easter Egg
 
 *Hint: Check what happens when you ***/purchase*** that one 1% lottery ticket*
 
----
+## 📋 Contest Compliance
 
-**Built for scale. Tested under fire. Ready for Black Friday.** 🛒 
+✅ **Exactly 10,000 items sold per hour** - Atomic Redis counters ensure precise inventory  
+✅ **User limit: 10 items maximum per sale** - Enforced via Redis user tracking  
+✅ **Checkout → Purchase flow implemented** - Two-phase commit with code generation  
+✅ **All attempts persisted in PostgreSQL** - Background workers handle bulk inserts  
+✅ **Minimal dependencies (3 libraries)** - Chi router, Redigo, lib/pq only  
+✅ **No frameworks** - Pure Go HTTP server with Chi for routing  
+✅ **Docker deployment ready** - Full containerized stack included  

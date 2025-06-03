@@ -33,6 +33,3 @@ go.work.sum
 
 # Personal docs
 docs/
-
-# k6
-loadtest-cloud.js
