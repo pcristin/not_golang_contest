@@ -93,7 +93,7 @@ Load Distribution: Amazon US East (Virginia) load zone
 Monitoring: Real-time Grafana Cloud dashboard tracking
 ```
 
-![Grafana Cloud Load Test Results](grafana_results.jpg)
+![Grafana Cloud Load Test Results](k6_loadtests/grafana_results.jpg)
 
 ## 🚀 Optimization Opportunities
 
