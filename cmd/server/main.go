@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/pcristin/golang_contest/internal/api"
 	"github.com/pcristin/golang_contest/internal/config"
 	"github.com/pcristin/golang_contest/internal/database"
@@ -80,7 +79,7 @@ func main() {
 	}
 
 	// Initialize router
-	router := chi.NewRouter()
+	mux := http.NewServeMux()
 
 	// Initialize handler
 	handler := api.NewHandler(config, redis, postgres)
@@ -113,15 +112,15 @@ func main() {
 	}()
 
 	// Add routes
-	router.Get("/health", handler.Health)
-	router.Post("/checkout", handler.Checkout)
-	router.Post("/purchase", handler.Purchase)
+	mux.HandleFunc("GET /health", handler.Health)
+	mux.HandleFunc("POST /checkout", handler.Checkout)
+	mux.HandleFunc("POST /purchase", handler.Purchase)
 
 	// Graceful shutdown
 	// Initialize server
 	server := &http.Server{
 		Addr:           ":" + config.GetPort(),
-		Handler:        router,
+		Handler:        mux,
 		ReadTimeout:    5 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		IdleTimeout:    120 * time.Second,

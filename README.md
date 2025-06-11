@@ -32,7 +32,6 @@ This system implements **aggressive fast-fail** strategies optimized for flash s
 **Go Dependencies (3 libraries):**
 | Dependency | Purpose | Size Impact |
 |------------|---------|-------------|
-| **Chi Router** | HTTP routing, middleware | Lightweight framework (~1MB) |
 | **Redigo** | Redis connection pooling | Mature, stable, lightweight client |
 | **lib/pq** | PostgreSQL driver | Raw SQL performance |
 
@@ -40,7 +39,9 @@ This system implements **aggressive fast-fail** strategies optimized for flash s
 - **Redis** - Atomic operations, session storage (essential for concurrency)
 - **PostgreSQL** - Sale metadata, user history (business logic persistence)
 
-**Binary Size**: ~9.4MB (lean, no ORM overhead) - can be optimized with build flags
+**Binary Size**:
+- ~9.4MB (lean, no ORM overhead)
+- ~6.4MB (with build optimizations flags `-ldflags="-s -w"`)
 
 ## 🧪 Testing Methodology
 
@@ -114,6 +115,15 @@ The system is designed for easy horizontal scaling:
 
 ## 🏃‍♂️ Quick Start
 
+ENVS:
+```bash
+PORT=8080 # port to run the server on (default: 8080)
+LOG_LEVEL=debug # log level (default: info)
+REDIS_URL=redis://localhost:6379 # redis url (default: localhost:6379)
+POSTGRES_URL=postgres://localhost:5432/flash_sale?sslmode=disable # postgres url (default: localhost:5432/flash_sale?sslmode=disable)
+```
+
+Run the server:
 ```bash
 # Start infrastructure
 make up
@@ -153,4 +163,4 @@ For architecture decisions, database schema, and Redis key patterns, explore the
 ✅ **All attempts persisted in PostgreSQL** - Background workers handle bulk inserts  
 ✅ **Minimal dependencies (3 libraries)** - Chi router, Redigo, lib/pq only  
 ✅ **No frameworks** - Pure Go HTTP server with Chi for routing  
-✅ **Docker deployment ready** - Full containerized stack included  
+✅ **Docker deployment ready** - Full containerized stack included
