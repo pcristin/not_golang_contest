@@ -121,6 +121,10 @@ PORT=8080 # port to run the server on (default: 8080)
 LOG_LEVEL=debug # log level (default: info)
 REDIS_URL=redis://localhost:6379 # redis url (default: localhost:6379)
 POSTGRES_URL=postgres://localhost:5432/flash_sale?sslmode=disable # postgres url (default: localhost:5432/flash_sale?sslmode=disable)
+
+# ONLY FOR DOCKER COMPOSE (LOCAL DEV ONLY)
+POSTGRES_PORT=5432 # postgres port (default: 5432)
+REDIS_PORT=6379 # redis port (default: 6379)
 ```
 
 Run the server:

@@ -3,11 +3,11 @@ services:
     image: postgres:15-alpine
     container_name: flash_sale_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: flash_sale
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-flash_sale}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,7 +23,7 @@ services:
     container_name: flash_sale_redis
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -38,13 +38,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        PORT: ${PORT:-8080}
     container_name: flash_sale_app
     environment:
-      PORT: 8080
-      REDIS_URL: redis:6379
-      POSTGRES_URL: postgres://postgres:postgres@postgres:5432/flash_sale?sslmode=disable
+      PORT: ${PORT:-8080}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      REDIS_URL: ${REDIS_URL:-redis:6379}
+      POSTGRES_URL: ${POSTGRES_URL:-postgres://postgres:postgres@postgres:5432/flash_sale?sslmode=disable}
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:${PORT:-8080}"
     depends_on:
       postgres:
         condition: service_healthy
