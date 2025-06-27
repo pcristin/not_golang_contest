@@ -144,22 +144,17 @@ func (h *Handler) executeNewSale(ctx context.Context) error {
 		ImageURL: imageURL,
 	})
 
-	// 4. Update the Redis active sale pointer
-	if err := h.Redis.UpdateActiveSalePointer(ctx, actualSaleID); err != nil {
-		return fmt.Errorf("failed to update Redis active sale pointer: %v", err)
+	// 4. Atomically initialize the new sale in Redis
+	if err := h.Redis.AtomicInitializeSale(ctx, actualSaleID, 10000); err != nil {
+		return fmt.Errorf("failed to atomically initialize new sale: %v", err)
 	}
 
-	// 5. Create the new sale in Redis
-	if err := h.Redis.CreateNewSaleKeys(ctx, actualSaleID); err != nil {
-		return fmt.Errorf("failed to create new sale keys in Redis: %v", err)
-	}
-
-	// 6. Clean up the old sale in Redis
+	// 5. Clean up the old sale in Redis
 	if err := h.Redis.CleanupOldSaleData(ctx); err != nil {
 		return fmt.Errorf("failed to cleanup old sale data in Redis: %v", err)
 	}
 
-	// 7. End any active sale (optional - won't fail if none exists)
+	// 6. End any active sale (optional - won't fail if none exists)
 	if err := h.endAnyActiveSale(ctx); err != nil {
 		logger.Error("sale scheduler | failed to end any active sale", "error", err)
 	}

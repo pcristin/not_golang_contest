@@ -477,6 +477,172 @@ func (r *RedisClient) Close() error {
 	return r.pool.Close()
 }
 
+// AtomicCheckout performs all checkout validations and counter updates atomically using Lua script
+func (r *RedisClient) AtomicCheckout(ctx context.Context, userID string) (*CheckoutResult, error) {
+	logger := myLogger.FromContext(ctx, "redis")
+
+	// Get the active sale ID
+	activeSaleID, err := r.GetActiveSaleID(ctx)
+	if err != nil {
+		logger.Error("redis atomic checkout | failed to get active sale ID", "error", err)
+		return nil, err
+	}
+
+	conn := r.pool.Get()
+	defer conn.Close()
+
+	// Prepare keys and arguments
+	stockKey := fmt.Sprintf("sale:%d:stock", activeSaleID)
+	userCountKey := fmt.Sprintf("sale:current:user:%s:count", userID)
+	itemsSoldKey := fmt.Sprintf("sale:%d:items_sold", activeSaleID)
+
+	keys := []interface{}{stockKey, userCountKey, itemsSoldKey}
+	args := []interface{}{userID, 10, 10000} // max_user_items=10, max_total_items=10000
+
+	// Execute Lua script
+	result, err := redis.Ints(conn.Do("EVAL", AtomicCheckoutScript, 3, keys[0], keys[1], keys[2], args[0], args[1], args[2]))
+	if err != nil {
+		logger.Error("redis atomic checkout | failed to execute script", "error", err)
+		return nil, err
+	}
+
+	if len(result) != 4 {
+		logger.Error("redis atomic checkout | unexpected result length", "length", len(result))
+		return nil, fmt.Errorf("unexpected result length: %d", len(result))
+	}
+
+	checkoutResult := &CheckoutResult{
+		StockRemaining: int64(result[0]),
+		UserCount:      int64(result[1]),
+		ItemsSold:      int64(result[2]),
+		Status:         CheckoutStatus(result[3]),
+	}
+
+	logger.Debug("redis atomic checkout | completed",
+		"user_id", userID,
+		"stock_remaining", checkoutResult.StockRemaining,
+		"user_count", checkoutResult.UserCount,
+		"items_sold", checkoutResult.ItemsSold,
+		"status", checkoutResult.Status.String())
+
+	return checkoutResult, nil
+}
+
+// AtomicRollback rolls back a failed checkout atomically using Lua script
+func (r *RedisClient) AtomicRollback(ctx context.Context, userID string) error {
+	logger := myLogger.FromContext(ctx, "redis")
+
+	// Get the active sale ID
+	activeSaleID, err := r.GetActiveSaleID(ctx)
+	if err != nil {
+		logger.Error("redis atomic rollback | failed to get active sale ID", "error", err)
+		return err
+	}
+
+	conn := r.pool.Get()
+	defer conn.Close()
+
+	// Prepare keys
+	stockKey := fmt.Sprintf("sale:%d:stock", activeSaleID)
+	userCountKey := fmt.Sprintf("sale:current:user:%s:count", userID)
+	itemsSoldKey := fmt.Sprintf("sale:%d:items_sold", activeSaleID)
+
+	keys := []interface{}{stockKey, userCountKey, itemsSoldKey}
+	args := []interface{}{userID}
+
+	// Execute Lua script
+	result, err := redis.Ints(conn.Do("EVAL", AtomicRollbackScript, 3, keys[0], keys[1], keys[2], args[0]))
+	if err != nil {
+		logger.Error("redis atomic rollback | failed to execute script", "error", err)
+		return err
+	}
+
+	logger.Debug("redis atomic rollback | completed",
+		"user_id", userID,
+		"new_stock", result[0],
+		"new_user_count", result[1],
+		"new_items_sold", result[2])
+
+	return nil
+}
+
+// AtomicCleanupExpiredCheckout cleans up expired checkout and updates counters atomically
+func (r *RedisClient) AtomicCleanupExpiredCheckout(ctx context.Context, userID string) error {
+	logger := myLogger.FromContext(ctx, "redis")
+
+	// Get the active sale ID
+	activeSaleID, err := r.GetActiveSaleID(ctx)
+	if err != nil {
+		logger.Error("redis atomic cleanup | failed to get active sale ID", "error", err)
+		return err
+	}
+
+	conn := r.pool.Get()
+	defer conn.Close()
+
+	// Prepare keys
+	stockKey := fmt.Sprintf("sale:%d:stock", activeSaleID)
+	userCountKey := fmt.Sprintf("sale:current:user:%s:count", userID)
+	itemsSoldKey := fmt.Sprintf("sale:%d:items_sold", activeSaleID)
+
+	keys := []interface{}{stockKey, userCountKey, itemsSoldKey}
+	args := []interface{}{userID}
+
+	// Execute Lua script
+	result, err := redis.Ints(conn.Do("EVAL", AtomicCleanupExpiredCheckoutScript, 3, keys[0], keys[1], keys[2], args[0]))
+	if err != nil {
+		logger.Error("redis atomic cleanup | failed to execute script", "error", err)
+		return err
+	}
+
+	logger.Debug("redis atomic cleanup | completed",
+		"user_id", userID,
+		"new_stock", result[0],
+		"new_user_count", result[1],
+		"new_items_sold", result[2])
+
+	return nil
+}
+
+// AtomicInitializeSale initializes all counters for a new sale atomically
+func (r *RedisClient) AtomicInitializeSale(ctx context.Context, saleID int, initialStock int) error {
+	logger := myLogger.FromContext(ctx, "redis")
+
+	conn := r.pool.Get()
+	defer conn.Close()
+
+	// Prepare keys
+	saleIDKey := fmt.Sprintf("sale:%d:id", saleID)
+	stockKey := fmt.Sprintf("sale:%d:stock", saleID)
+	itemsSoldKey := fmt.Sprintf("sale:%d:items_sold", saleID)
+	startedAtKey := fmt.Sprintf("sale:%d:started_at", saleID)
+	activeSaleKey := "sale:current:active_sale"
+
+	keys := []interface{}{saleIDKey, stockKey, itemsSoldKey, startedAtKey, activeSaleKey}
+	args := []interface{}{saleID, initialStock, time.Now().Unix()}
+
+	// Execute Lua script
+	result, err := redis.String(conn.Do("EVAL", AtomicInitializeSaleScript, 5, keys[0], keys[1], keys[2], keys[3], keys[4], args[0], args[1], args[2]))
+	if err != nil {
+		logger.Error("redis atomic initialize | failed to execute script", "error", err)
+		return err
+	}
+
+	if result != "OK" {
+		logger.Error("redis atomic initialize | unexpected result", "result", result)
+		return fmt.Errorf("unexpected result: %s", result)
+	}
+
+	// Clear cache after new sale initialization
+	r.cacheMutex.Lock()
+	r.currentSaleID = saleID
+	r.cachedSaleTime = time.Now()
+	r.cacheMutex.Unlock()
+
+	logger.Info("redis atomic initialize | initialized new sale", "sale_id", saleID, "initial_stock", initialStock)
+	return nil
+}
+
 // GetAndDeleteCheckoutCodeAtomically gets the checkout code and deletes it atomically
 func (r *RedisClient) GetAndDeleteCheckoutCodeAtomically(ctx context.Context, code string) (string, error) {
 	logger := myLogger.FromContext(ctx, "redis")

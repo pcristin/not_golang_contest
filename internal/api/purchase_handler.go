@@ -66,9 +66,12 @@ func (h *Handler) Purchase(w http.ResponseWriter, r *http.Request) {
 
 	// Get sale data from cache
 	saleData, ok := h.saleCache.Load(saleID)
+	var itemName, imageURL string
+
 	if !ok {
 		logger.Error("purchase | sale data not found in cache. Requesting sale data from Postgres", "sale_id", saleID)
-		itemName, imageURL, err := h.Postgres.GetSaleByID(saleID)
+		var err error
+		itemName, imageURL, err = h.Postgres.GetSaleByID(saleID)
 		if err != nil {
 			logger.Error("purchase | failed to get sale data from Postgres", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -78,13 +81,24 @@ func (h *Handler) Purchase(w http.ResponseWriter, r *http.Request) {
 			ItemName: itemName,
 			ImageURL: imageURL,
 		})
-		saleData = SaleData{
-			ItemName: itemName,
-			ImageURL: imageURL,
+	} else {
+		// Safe type assertion with error handling
+		sale, ok := saleData.(SaleData)
+		if !ok {
+			logger.Error("purchase | invalid sale data type in cache", "sale_id", saleID, "data_type", fmt.Sprintf("%T", saleData))
+			// Fallback to database
+			var err error
+			itemName, imageURL, err = h.Postgres.GetSaleByID(saleID)
+			if err != nil {
+				logger.Error("purchase | failed to get sale data from Postgres", "error", err)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			itemName = sale.ItemName
+			imageURL = sale.ImageURL
 		}
 	}
-	itemName := saleData.(SaleData).ItemName
-	imageURL := saleData.(SaleData).ImageURL
 
 	defer func() {
 		select {

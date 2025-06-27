@@ -15,6 +15,7 @@ import (
 	"github.com/pcristin/golang_contest/internal/config"
 	"github.com/pcristin/golang_contest/internal/database"
 	myLogger "github.com/pcristin/golang_contest/internal/logger"
+	"github.com/pcristin/golang_contest/internal/middleware"
 )
 
 func main() {
@@ -111,16 +112,27 @@ func main() {
 		handler.ProcessPurchaseInserts(workerCtx)
 	}()
 
-	// Add routes
+	// Add routes with middleware protection
 	mux.HandleFunc("GET /health", handler.Health)
 	mux.HandleFunc("POST /checkout", handler.Checkout)
 	mux.HandleFunc("POST /purchase", handler.Purchase)
+
+	// Create middleware chain
+	middlewareChain := middleware.Chain(
+		middleware.RecoveryMiddleware,
+		middleware.RequestIDMiddleware,
+		middleware.LoggingMiddleware,
+		middleware.TimeoutMiddleware(10*time.Second),
+	)
+
+	// Wrap the mux with middleware
+	protectedHandler := middlewareChain(mux)
 
 	// Graceful shutdown
 	// Initialize server
 	server := &http.Server{
 		Addr:           ":" + config.GetPort(),
-		Handler:        mux,
+		Handler:        protectedHandler, // Use protected handler instead of mux
 		ReadTimeout:    5 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		IdleTimeout:    120 * time.Second,
