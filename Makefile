@@ -1,4 +1,4 @@
-.PHONY: build run up up-build down logs clean
+.PHONY: build run up up-build down logs clean megaload
 APP_NAME := flash_sale
 
 build:

@@ -30,8 +30,8 @@ func NewHandler(config *config.Config, redis *database.RedisClient, postgres *da
 		Redis:    redis,
 		Postgres: postgres,
 
-		attemptsChan:  make(chan database.CheckoutAttempt, 25000), // approx 2,5 Mb of size
-		purchasesChan: make(chan database.Purchase, 10000),        // approx 1 Mb of size
+		attemptsChan:  make(chan database.CheckoutAttempt, 100000), // approx 10 Mb of size
+		purchasesChan: make(chan database.Purchase, 100000),        // approx 10 Mb of size
 	}
 }
 

@@ -13,14 +13,8 @@ import (
 )
 
 func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
-
-	// Generate a request ID
-	requestID := utils.GenerateRequestID()
-
-	// Create a new context with the request ID
+	// Get context with request ID (set by middleware)
 	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, myLogger.RequestIDKey, requestID)
 
 	// Init logger for module
 	logger := myLogger.FromContext(ctx, "checkout")
@@ -75,56 +69,7 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now(),
 	}
 
-	defer func() {
-		select {
-		case h.attemptsChan <- attempt:
-			// Sent to the background worker
-		default:
-			logger.Error("dropped attempt: channel full")
-		}
-	}()
-
-	// Decrement the stock
-	_, err = h.Redis.DecrementStockFastFail(ctx)
-	if err != nil {
-		logger.Error("failed to decrement stock", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Increment the user checkout count to avoid race conditions
-	userCheckoutCount, err := h.Redis.IncrementUserCheckoutCount(ctx, userID)
-	if err != nil {
-		logger.Error("failed to increment user checkout count", "error", err)
-		if _, err := h.Redis.IncrementStockFastFail(ctx); err != nil {
-			logger.Error("failed to increment stock", "error", err)
-		}
-		if err := h.Redis.DecrementUserCheckoutCount(ctx, userID); err != nil {
-			logger.Error("failed to decrement user checkout count", "error", err)
-		}
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	if userCheckoutCount > 10 {
-		// Send the attempt to the background worker
-		attempt.Status = "user limit"
-
-		// Decrement the user checkout count to avoid race conditions
-		if err := h.Redis.DecrementUserCheckoutCount(ctx, userID); err != nil {
-			logger.Error("failed to decrement user checkout count", "error", err)
-		}
-
-		// Increment the stock to avoid race conditions
-		if _, err := h.Redis.IncrementStockFastFail(ctx); err != nil {
-			logger.Error("failed to increment stock", "error", err)
-		}
-
-		http.Error(w, "user has already checked out 10 items", http.StatusTooManyRequests)
-		return
-	}
-
-	// Validate the item ID
+	// Validate the item ID first (no need to hit Redis for invalid requests)
 	providedItemID, err := strconv.ParseInt(itemID, 10, 64)
 	if err != nil || providedItemID <= 0 {
 		logger.Error("failed to parse item ID", "error", err)
@@ -132,26 +77,78 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Atomically increment the items sold count
-	actualItemsSold, err := h.Redis.IncrementItemsSoldCount(ctx)
+	// Perform atomic checkout operation
+	result, err := h.Redis.AtomicCheckout(ctx, userID)
 	if err != nil {
-		logger.Error("failed to increment items sold count", "error", err)
+		logger.Error("failed to perform atomic checkout", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	if actualItemsSold > 10000 {
-		logger.Error("sale has reached the maximum number of items sold")
-		if err := h.Redis.DecrementItemsSoldCount(ctx); err != nil {
-			logger.Error("failed to decrement items sold count", "error", err)
-		}
-		if _, err := h.Redis.IncrementStockFastFail(ctx); err != nil {
-			logger.Error("failed to increment stock", "error", err)
-		}
-		if err := h.Redis.DecrementUserCheckoutCount(ctx, userID); err != nil {
-			logger.Error("failed to decrement user checkout count", "error", err)
-		}
+	// Handle different checkout statuses
+	switch result.Status {
+	case database.CheckoutOutOfStock:
+		attempt.Status = "out of stock"
+		defer func() {
+			select {
+			case h.attemptsChan <- attempt:
+				// Sent to the background worker
+			default:
+				logger.Error("dropped attempt: channel full")
+			}
+		}()
+		logger.Info("checkout failed: out of stock", "stock_remaining", result.StockRemaining)
 		http.Error(w, "stock sold out", http.StatusConflict)
+		return
+
+	case database.CheckoutUserLimitExceeded:
+		attempt.Status = "user limit"
+		defer func() {
+			select {
+			case h.attemptsChan <- attempt:
+				// Sent to the background worker
+			default:
+				logger.Error("dropped attempt: channel full")
+			}
+		}()
+		logger.Info("checkout failed: user limit exceeded", "user_count", result.UserCount)
+		http.Error(w, "user has already checked out 10 items", http.StatusTooManyRequests)
+		return
+
+	case database.CheckoutSaleLimitExceeded:
+		attempt.Status = "sale limit"
+		defer func() {
+			select {
+			case h.attemptsChan <- attempt:
+				// Sent to the background worker
+			default:
+				logger.Error("dropped attempt: channel full")
+			}
+		}()
+		logger.Info("checkout failed: sale limit exceeded", "items_sold", result.ItemsSold)
+		http.Error(w, "stock sold out", http.StatusConflict)
+		return
+
+	case database.CheckoutSuccess:
+		// Continue with successful checkout
+		logger.Info("checkout succeeded atomically",
+			"user_id", userID,
+			"stock_remaining", result.StockRemaining,
+			"user_count", result.UserCount,
+			"items_sold", result.ItemsSold)
+
+	default:
+		attempt.Status = "unknown error"
+		defer func() {
+			select {
+			case h.attemptsChan <- attempt:
+				// Sent to the background worker
+			default:
+				logger.Error("dropped attempt: channel full")
+			}
+		}()
+		logger.Error("checkout failed: unknown status", "status", result.Status)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -161,15 +158,12 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 	// Store the checkout code in Redis (TTL is 20 seconds)
 	if err := h.Redis.SetCheckoutCode(ctx, userID, saleIDStr, itemID, checkoutCode, 20); err != nil {
 		logger.Error("failed to set checkout code", "error", err)
-		if _, err := h.Redis.IncrementStockFastFail(ctx); err != nil {
-			logger.Error("failed to increment stock", "error", err)
+
+		// Rollback the atomic checkout operation
+		if rollbackErr := h.Redis.AtomicRollback(ctx, userID); rollbackErr != nil {
+			logger.Error("failed to rollback atomic checkout", "error", rollbackErr)
 		}
-		if err := h.Redis.DecrementUserCheckoutCount(ctx, userID); err != nil {
-			logger.Error("failed to decrement user checkout count", "error", err)
-		}
-		if err := h.Redis.DecrementItemsSoldCount(ctx); err != nil {
-			logger.Error("failed to decrement items sold count", "error", err)
-		}
+
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -177,6 +171,16 @@ func (h *Handler) Checkout(w http.ResponseWriter, r *http.Request) {
 	// Send the attempt to the background worker
 	attempt.Status = "success"
 	attempt.Code = &checkoutCode
+
+	// Use defer to ensure attempt is logged even if response writing fails
+	defer func() {
+		select {
+		case h.attemptsChan <- attempt:
+			// Sent to the background worker
+		default:
+			logger.Error("dropped attempt: channel full")
+		}
+	}()
 
 	// Return the checkout code
 	response := CheckoutResponse{
